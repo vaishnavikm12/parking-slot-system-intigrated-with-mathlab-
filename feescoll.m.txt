@@ -1,0 +1,144 @@
+clc;
+clear;
+
+% Serial Setup for Arduino
+s = serialport("COM6", 9600);
+configureTerminator(s, "LF");
+flush(s);
+
+% Initialize vehicle data
+vehicles = struct('ID', {}, 'EntryTime', {}, 'ExitTime', {}, 'DurationHours', {});222
+vehicleCount = 0;
+
+disp("🚦 System ready... Waiting for vehicle events...");
+
+while true
+    if s.NumBytesAvailable > 0
+        data = strtrim(readline(s));
+        disp("📡 Arduino says: " + data);
+
+        % Vehicle Entry Detected
+        if strcmpi(data, "Entry")
+            vehicleCount = vehicleCount + 1;
+            vehicles(vehicleCount).ID = vehicleCount;
+            vehicles(vehicleCount).EntryTime = datetime('now');
+            vehicles(vehicleCount).ExitTime = NaT;
+
+            disp("🚗 Vehicle " + vehicleCount + " ENTERED at " + datestr(vehicles(vehicleCount).EntryTime));
+
+            % Process Entry Image (Optional: Replace image1.jpg with your camera image path)
+            image_path = 'image1.jpg';
+            vehicle_image = imread(image_path);
+
+            % Image Preprocessing
+            gray_image = rgb2gray(vehicle_image);
+            binary_image = imbinarize(gray_image, 'adaptive');
+            edges = edge(binary_image, 'Canny');
+            [B, ~] = bwboundaries(edges, 'noholes');
+
+            % Display Detected Vehicle Image
+            figure;
+            imshow(vehicle_image);
+            hold on;
+            for k = 1:length(B)
+                boundary = B{k};
+                plot(boundary(:, 2), boundary(:, 1), 'g', 'LineWidth', 2);
+            end
+            title('Vehicle Detected at Entry');
+            hold off;
+
+        % Vehicle Exit Detected
+        elseif strcmpi(data, "Exit")
+            idx = find(isnat([vehicles.ExitTime]), 1, 'first');
+            if isempty(idx)
+                disp("⚠ No vehicle pending for exit!");
+                continue;
+            end
+
+            % Ask user to input parking duration
+            user_hours = input('Enter parking duration in hours: ');
+            vehicles(idx).ExitTime = vehicles(idx).EntryTime + hours(user_hours);
+            vehicles(idx).DurationHours = user_hours;
+
+            % Parking Fee Calculation
+            fee_per_hour = 20;
+            parking_fee = user_hours * fee_per_hour;
+
+            % Available QR Codes
+            availableQRs = [20, 30, 40, 50, 60, 80, 90, 100];
+            qr_code_amount = min(availableQRs(availableQRs >= parking_fee));
+
+            if isempty(qr_code_amount)
+                disp('⚠ No QR Code available for this amount. Maximum is ₹100.');
+                continue;
+            end
+
+            qr_code_file = sprintf('QrCode%d.png', qr_code_amount);
+
+            if isfile(qr_code_file)
+                % Display QR Code
+                figure_handle = figure('Name', '📷 Scan to Pay', 'NumberTitle', 'off', ...
+                    'Color', 'white', 'Position', [300 200 600 600]);
+                subplot(2, 1, 1);
+                qr_code_image = imread(qr_code_file);
+                imshow(qr_code_image);
+                axis off;
+                title(sprintf('Scan to Pay ₹%d', qr_code_amount), 'FontSize', 14);
+
+                subplot(2, 1, 2);
+                axis off;
+                text(0, 1.0, ['Vehicle: ' num2str(vehicles(idx).ID)], 'FontSize', 14, 'FontWeight', 'bold');
+                text(0, 0.85, ['Entry Time: ' datestr(vehicles(idx).EntryTime)], 'FontSize', 12);
+                text(0, 0.70, ['Exit Time: ' datestr(vehicles(idx).ExitTime)], 'FontSize', 12);
+                text(0, 0.55, ['Parking Duration: ' num2str(user_hours) ' hours'], 'FontSize', 12);
+                text(0, 0.40, ['💰 Fee: ₹' num2str(parking_fee)], 'FontSize', 14, 'Color', 'red');
+
+                % Simulated 4-minute countdown for payment
+                for time_left = 240:-1:0
+                    pause(1);
+                    fprintf('⏳ Time Left for Payment: %d seconds\n', time_left);
+
+                    % Example: Simulate payment completion at 100 seconds
+                    if time_left == 100
+                        disp('✅ Payment Successful!');
+                        break;
+                    end
+                end
+
+                close(figure_handle);
+                disp('QR Code window closed.');
+            else
+                disp('⚠ Error: QR Code image not found.');
+                continue;
+            end
+
+            % Wait 30 seconds (Simulate receipt processing delay)
+            pause(30);
+
+            % Print Receipt
+            fprintf('\n------------------------- GALLERIA MALL PARKING RECEIPT -------------------------\n');
+            fprintf('Vehicle ID               : %d\n', vehicles(idx).ID);
+            fprintf('Vehicle Entry Time       : %s\n', datestr(vehicles(idx).EntryTime));
+            fprintf('Vehicle Exit Time        : %s\n', datestr(vehicles(idx).ExitTime));
+            fprintf('Parking Duration         : %d hours\n', user_hours);
+            fprintf('Parking Fee (₹20/hour)   : ₹%.2f\n', parking_fee);
+            fprintf('---------------------------------------------------------------------------------\n');
+            fprintf('                       Thank you for parking with us!\n');
+            fprintf('                       Visit us again at Galleria Mall.\n');
+            fprintf('---------------------------------------------------------------------------------\n');
+
+            % Display all vehicle entries
+            fprintf('\n📋 All Vehicle Entries:\n');
+            for i = 1:vehicleCount
+                entryStr = datestr(vehicles(i).EntryTime);
+                if isnat(vehicles(i).ExitTime)
+                    fprintf('Vehicle %d ENTERED at: %s (Still Parked)\n', vehicles(i).ID, entryStr);
+                else
+                    fprintf('Vehicle %d ENTERED at: %s (Exited)\n', vehicles(i).ID, entryStr);
+                end
+            end
+            fprintf('---------------------------------------------------------------------------------\n');
+        end
+    end
+    pause(0.1); % Allow serial buffer to refresh
+end
